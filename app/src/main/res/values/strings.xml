@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">Door Reminder</string>
+    <!-- Strings used for fragments for navigation -->
+    <string name="last_checked">🕒 Last checked: --:--</string>
+    <string name="unlocked">🔓 Unlocked</string>
+    <string name="locked">🔒 Locked</string>
+</resources>
