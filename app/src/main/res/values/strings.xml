@@ -1,7 +1,53 @@
 <resources>
     <string name="app_name">Door Reminder</string>
-    <!-- Strings used for fragments for navigation -->
-    <string name="last_checked">🕒 Last checked: --:--</string>
-    <string name="unlocked">🔓 Unlocked</string>
-    <string name="locked">🔒 Locked</string>
+
+    <!-- Door status -->
+    <string name="status_locked">Marked as locked</string>
+    <string name="status_unlocked">Marked as unlocked</string>
+    <string name="status_unknown">No status recorded yet</string>
+    <string name="status_unknown_hint">Tap the button below after you lock your door.</string>
+    <string name="status_changed_at">Updated %1$s</string>
+    <string name="status_changed_just_now">Just now</string>
+    <string name="status_changed_at_unknown">Update time not available</string>
+    <string name="action_mark_locked">Mark as locked</string>
+    <string name="action_mark_unlocked">Mark as unlocked</string>
+    <string name="status_disclaimer">Door Reminder records the status you enter. It does not detect whether your door is actually locked.</string>
+    <string name="snackbar_marked_locked">Marked as locked</string>
+    <string name="snackbar_marked_unlocked">Marked as unlocked</string>
+    <string name="action_undo">Undo</string>
+
+    <!-- Daily reminder -->
+    <string name="reminder_title">Daily reminder</string>
+    <string name="reminder_off">Off. Get a daily notification to check your door.</string>
+    <string name="reminder_every_day_at">Every day at %1$s</string>
+    <string name="reminder_set">Set reminder</string>
+    <string name="reminder_change">Change time</string>
+    <string name="reminder_turn_off">Turn off</string>
+    <string name="reminder_picker_title">Remind me every day at</string>
+    <string name="reminder_saved">Reminder set for %1$s every day</string>
+    <string name="reminder_removed">Daily reminder turned off</string>
+    <string name="reminder_delivery_note">Android may deliver reminders a few minutes late to save battery.</string>
+    <string name="notifications_blocked">Notifications are turned off for Door Reminder, so the reminder can\'t appear.</string>
+    <string name="notifications_allow">Allow</string>
+    <string name="notifications_rationale_title">Allow notifications?</string>
+    <string name="notifications_rationale_message">Door Reminder needs notification permission to show your daily reminder. Nothing else is sent.</string>
+    <string name="action_continue">Continue</string>
+    <string name="action_not_now">Not now</string>
+
+    <!-- Notification -->
+    <string name="notification_channel_name">Daily reminders</string>
+    <string name="notification_channel_description">Your daily reminder to check the door.</string>
+    <string name="notification_title">Did you lock the door?</string>
+    <string name="notification_text_locked_at">You marked it as locked %1$s. Tap to review or update.</string>
+    <string name="notification_text_locked">You marked it as locked. Tap to review or update.</string>
+    <string name="notification_text_unlocked">Your door is marked as unlocked. Tap to update the status.</string>
+    <string name="notification_text_no_record">Tap to record your door status.</string>
+    <string name="notification_text_public">Time to check your door.</string>
+
+    <!-- Menu -->
+    <string name="menu_privacy_options">Privacy and ad settings</string>
+    <string name="menu_privacy_policy">Privacy policy</string>
+    <string name="privacy_policy_url" translatable="false">https://superadmir.blogspot.com/2025/07/privacy-policy-for-door-reminder-app.html</string>
+    <string name="error_no_browser">No app available to open the link.</string>
+    <string name="error_no_settings">Could not open settings.</string>
 </resources>

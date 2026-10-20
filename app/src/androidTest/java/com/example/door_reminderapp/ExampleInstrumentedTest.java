@@ -21,6 +21,6 @@ public class ExampleInstrumentedTest {
     public void useAppContext() {
         // Context of the app under test.
         Context appContext = InstrumentationRegistry.getInstrumentation().getTargetContext();
-        assertEquals("com.example.door_reminderapp", appContext.getPackageName());
+        assertEquals("com.dr.door_reminderapp.debug", appContext.getPackageName());
     }
 }

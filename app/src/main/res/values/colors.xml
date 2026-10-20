@@ -2,4 +2,32 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!-- Brand / Material 3 roles (light). Night values live in values-night/colors.xml. -->
+    <color name="brand_primary">#2F5DA8</color>
+    <color name="brand_on_primary">#FFFFFF</color>
+    <color name="brand_primary_container">#D7E3FF</color>
+    <color name="brand_on_primary_container">#001B3F</color>
+    <color name="brand_secondary">#555F71</color>
+    <color name="brand_on_secondary">#FFFFFF</color>
+    <color name="brand_secondary_container">#D9E3F8</color>
+    <color name="brand_on_secondary_container">#121C2B</color>
+    <color name="brand_background">#F9F9FF</color>
+    <color name="brand_on_background">#191C20</color>
+    <color name="brand_surface_variant">#E0E2EC</color>
+    <color name="brand_on_surface_variant">#43474E</color>
+    <color name="brand_outline">#74777F</color>
+
+    <!-- Door status colors; each foreground meets WCAG AA on its container. -->
+    <color name="status_locked_container">#D3F5DB</color>
+    <color name="status_on_locked_container">#0A3A1C</color>
+    <color name="status_locked_icon">#1B6D36</color>
+    <color name="status_unlocked_container">#FFDAD5</color>
+    <color name="status_on_unlocked_container">#410003</color>
+    <color name="status_unlocked_icon">#A4161A</color>
+    <color name="status_unknown_container">#E0E2EC</color>
+    <color name="status_on_unknown_container">#191C20</color>
+    <color name="status_unknown_icon">#43474E</color>
+
+    <color name="launcher_background">#000000</color>
 </resources>

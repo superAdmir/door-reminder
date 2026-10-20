@@ -1,8 +1,6 @@
-<resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
-    <style name="Base.Theme.DoorreminderApp" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your dark theme here. -->
-        <!-- <item name="colorPrimary">@color/my_dark_primary</item> -->
-        <item name="android:fontFamily">@font/montserrat_regular</item>
-    </style>
+<resources>
+    <!--
+        Intentionally empty: the base theme extends Theme.Material3.DayNight and the dark palette
+        is provided by values-night/colors.xml, so no separate night theme is needed.
+    -->
 </resources>

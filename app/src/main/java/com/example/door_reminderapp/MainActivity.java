@@ -1,274 +1,347 @@
 package com.example.door_reminderapp;
 
-import android.annotation.SuppressLint;
-import android.app.AlarmManager;
-import android.app.Dialog;
-import android.app.PendingIntent;
-import android.app.TimePickerDialog;
+import android.Manifest;
+import android.content.ActivityNotFoundException;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
-import android.graphics.drawable.Drawable;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Handler;
-import android.view.Gravity;
-import android.view.Window;
-import android.view.WindowManager;
-import android.widget.Button;
-import android.widget.TextView;
+import android.provider.Settings;
+import android.text.format.DateFormat;
+import android.view.Menu;
+import android.view.MenuItem;
+import android.view.View;
 import android.widget.Toast;
 
+import androidx.activity.EdgeToEdge;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.annotation.ColorRes;
+import androidx.annotation.DrawableRes;
+import androidx.annotation.NonNull;
+import androidx.annotation.StringRes;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.appcompat.widget.SwitchCompat;
-import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.graphics.ColorUtils;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 
-import com.google.android.gms.ads.AdRequest;
-import com.google.android.gms.ads.AdView;
-import com.google.android.gms.ads.MobileAds;
-import com.google.android.ump.ConsentInformation;
-import com.google.android.ump.ConsentRequestParameters;
-import com.google.android.ump.ConsentForm;
-import com.google.android.ump.UserMessagingPlatform;
-import com.google.android.ump.FormError;
+import com.example.door_reminderapp.databinding.ActivityMainBinding;
+import com.google.android.material.color.MaterialColors;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+import com.google.android.material.snackbar.Snackbar;
+import com.google.android.material.timepicker.MaterialTimePicker;
+import com.google.android.material.timepicker.TimeFormat;
 
-import java.text.SimpleDateFormat;
-import java.util.Calendar;
-import java.util.Date;
-import java.util.Locale;
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends AppCompatActivity implements AdsController.Listener {
 
-    private TextView statusText, timeText, reminderText;
-    private SwitchCompat switchLock;
-    private SharedPreferences prefs;
+    private static final String TIME_PICKER_TAG = "reminder_time_picker";
+    private static final ReminderTime DEFAULT_REMINDER = ReminderTime.of(21, 0);
 
-    private ConsentInformation consentInformation;
+    private ActivityMainBinding binding;
+    private DoorStateStore store;
+    private AdsController ads;
+    private DoorState state = DoorState.empty();
+
+    private final ActivityResultLauncher<String> notificationPermissionLauncher =
+            registerForActivityResult(new ActivityResultContracts.RequestPermission(),
+                    granted -> renderReminder());
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        EdgeToEdge.enable(this);
+        binding = ActivityMainBinding.inflate(getLayoutInflater());
+        setContentView(binding.getRoot());
+        applyWindowInsets();
 
-        // GDPR Consent first
-        requestGDPRConsent();
+        store = DoorStateStore.from(this);
+        ReminderNotifications.ensureChannel(this);
+        // Repairs the alarm if it was lost (e.g. force-stop) and migrates the 1.0 alarm.
+        ReminderScheduler.sync(this);
 
-        setContentView(R.layout.activity_main);
+        setupToolbar();
+        binding.toggleButton.setOnClickListener(v -> toggleStatus());
+        binding.setReminderButton.setOnClickListener(v -> showTimePicker());
+        binding.turnOffReminderButton.setOnClickListener(v -> turnOffReminder());
+        binding.allowNotificationsButton.setOnClickListener(v -> requestNotificationAccess());
 
-        // Handle notification permission for Android 13+
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS)
-                    != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(this,
-                        new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 101);
-            }
-        }
+        // A time picker restored after rotation needs its listener re-attached.
+        MaterialTimePicker restoredPicker =
+                (MaterialTimePicker) getSupportFragmentManager().findFragmentByTag(TIME_PICKER_TAG);
+        if (restoredPicker != null) attachPickerListener(restoredPicker);
 
-        switchLock = findViewById(R.id.switchLock);
-        statusText = findViewById(R.id.statusText);
-        timeText = findViewById(R.id.timeText);
-        reminderText = findViewById(R.id.reminderText);
+        ads = new AdsController(this, binding.adContainer, this);
+        onPrivacyOptionsAvailabilityChanged();
+        ads.start();
+    }
 
-        Button btnSetReminder = findViewById(R.id.btnSetReminder);
-        btnSetReminder.setOnClickListener(v -> showTimePicker());
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // Status, relative time and notification permission may have changed while away.
+        renderStatus();
+        renderReminder();
+        ads.resume();
+    }
 
-        Button btnDeleteReminder = findViewById(R.id.btnDeleteReminder);
-        btnDeleteReminder.setOnClickListener(v -> deleteReminder());
+    @Override
+    protected void onPause() {
+        ads.pause();
+        super.onPause();
+    }
 
-        prefs = getSharedPreferences("SwitchPrefs", MODE_PRIVATE);
-        boolean isLocked = prefs.getBoolean("isLocked", false);
-        String savedTime = prefs.getString("last_checked_time", "--:--");
+    @Override
+    protected void onDestroy() {
+        ads.destroy();
+        super.onDestroy();
+    }
 
-        String savedReminderTime = prefs.getString("reminder_time", null);
-        if (savedReminderTime != null) {
-            updateReminderText(savedReminderTime);
-        } else {
-            reminderText.setText("");
-        }
-
-        switchLock.setChecked(isLocked);
-        updateUI(isLocked, savedTime);
-        showTransparentPopup(isLocked);
-
-        switchLock.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            String currentTime = getCurrentTime();
-
-            SharedPreferences.Editor editor = prefs.edit();
-            editor.putBoolean("isLocked", isChecked);
-            editor.putString("last_checked_time", currentTime);
-            editor.apply();
-
-            updateUI(isChecked, currentTime);
-            showTransparentPopup(isChecked);
+    private void applyWindowInsets() {
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root, (view, windowInsets) -> {
+            Insets bars = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars()
+                    | WindowInsetsCompat.Type.displayCutout());
+            binding.toolbar.setPadding(0, bars.top, 0, 0);
+            view.setPadding(bars.left, 0, bars.right, bars.bottom);
+            return WindowInsetsCompat.CONSUMED;
         });
     }
 
-    // GDPR Consent (UMP SDK)
-    private void requestGDPRConsent() {
-        ConsentRequestParameters params = new ConsentRequestParameters.Builder().build();
-
-        consentInformation = UserMessagingPlatform.getConsentInformation(this);
-        consentInformation.requestConsentInfoUpdate(
-                this,
-                params,
-                () -> {
-                    if (consentInformation.isConsentFormAvailable()) {
-                        loadConsentForm();
-                    } else {
-                        initAdMob(); // Safe to load ads
-                    }
-                },
-                formError -> {
-                    initAdMob(); // Even on failure, continue
-                }
-        );
+    private void setupToolbar() {
+        binding.toolbar.inflateMenu(R.menu.main_menu);
+        binding.toolbar.setOnMenuItemClickListener(this::onToolbarItemClicked);
     }
 
-    private void loadConsentForm() {
-        UserMessagingPlatform.loadConsentForm(
-                this,
-                consentForm -> {
-                    if (consentInformation.getConsentStatus() == ConsentInformation.ConsentStatus.REQUIRED) {
-                        consentForm.show(
-                                this,
-                                formError -> initAdMob() // Continue regardless
-                        );
-                    } else {
-                        initAdMob(); // Consent not required
-                    }
-                },
-                formError -> initAdMob() // Load failed, continue
-        );
+    private boolean onToolbarItemClicked(@NonNull MenuItem item) {
+        int id = item.getItemId();
+        if (id == R.id.action_privacy_options) {
+            ads.showPrivacyOptions();
+            return true;
+        } else if (id == R.id.action_privacy_policy) {
+            openUri(Uri.parse(getString(R.string.privacy_policy_url)), R.string.error_no_browser);
+            return true;
+        }
+        return false;
     }
 
-    // Initialize AdMob after consent
-    private void initAdMob() {
-        MobileAds.initialize(this);
-        AdView adView = findViewById(R.id.adView);
-        AdRequest adRequest = new AdRequest.Builder().build();
-        adView.loadAd(adRequest);
+    @Override
+    public void onPrivacyOptionsAvailabilityChanged() {
+        Menu menu = binding.toolbar.getMenu();
+        MenuItem item = menu.findItem(R.id.action_privacy_options);
+        if (item != null) item.setVisible(ads.isPrivacyOptionsRequired());
+    }
+
+    // ---- Door status -------------------------------------------------------------------------
+
+    private void toggleStatus() {
+        DoorState previous = store.getState();
+        boolean nowLocked = !previous.locked || !previous.hasRecord;
+        state = store.setLocked(nowLocked, System.currentTimeMillis());
+        renderStatus();
+
+        Snackbar snackbar = Snackbar.make(binding.getRoot(),
+                nowLocked ? R.string.snackbar_marked_locked : R.string.snackbar_marked_unlocked,
+                Snackbar.LENGTH_LONG);
+        snackbar.setAction(R.string.action_undo, v -> {
+            store.restore(previous);
+            renderStatus();
+        });
+        if (binding.adContainer.getVisibility() == View.VISIBLE) {
+            snackbar.setAnchorView(binding.adContainer);
+        }
+        snackbar.show();
+    }
+
+    private void renderStatus() {
+        state = store.getState();
+        @StringRes int title;
+        @DrawableRes int icon;
+        @ColorRes int container;
+        @ColorRes int onContainer;
+        @ColorRes int iconColor;
+        if (!state.hasRecord) {
+            title = R.string.status_unknown;
+            icon = R.drawable.ic_status_unknown;
+            container = R.color.status_unknown_container;
+            onContainer = R.color.status_on_unknown_container;
+            iconColor = R.color.status_unknown_icon;
+        } else if (state.locked) {
+            title = R.string.status_locked;
+            icon = R.drawable.ic_status_locked;
+            container = R.color.status_locked_container;
+            onContainer = R.color.status_on_locked_container;
+            iconColor = R.color.status_locked_icon;
+        } else {
+            title = R.string.status_unlocked;
+            icon = R.drawable.ic_status_unlocked;
+            container = R.color.status_unlocked_container;
+            onContainer = R.color.status_on_unlocked_container;
+            iconColor = R.color.status_unlocked_icon;
+        }
+
+        int containerColor = ContextCompat.getColor(this, container);
+        int textColor = ContextCompat.getColor(this, onContainer);
+        binding.statusCard.setCardBackgroundColor(containerColor);
+        binding.statusIcon.setImageResource(icon);
+        binding.statusIcon.setImageTintList(
+                ColorStateList.valueOf(ContextCompat.getColor(this, iconColor)));
+        int surface = MaterialColors.getColor(binding.statusIcon, com.google.android.material.R.attr.colorSurface);
+        binding.statusIcon.setBackgroundTintList(
+                ColorStateList.valueOf(ColorUtils.setAlphaComponent(surface, 0xB3)));
+        binding.statusTitle.setText(title);
+        binding.statusTitle.setTextColor(textColor);
+        binding.statusChangedAt.setTextColor(textColor);
+        binding.statusRelative.setTextColor(textColor);
+
+        String changedAt;
+        String relative = "";
+        if (!state.hasRecord) {
+            changedAt = getString(R.string.status_unknown_hint);
+        } else if (state.hasChangedAtTime()) {
+            changedAt = getString(R.string.status_changed_at,
+                    TimeFormatting.dateTime(this, state.changedAtMillis));
+            relative = TimeFormatting.relative(this, state.changedAtMillis, System.currentTimeMillis());
+        } else if (state.legacyChangedAtText != null) {
+            changedAt = getString(R.string.status_changed_at, state.legacyChangedAtText);
+        } else {
+            changedAt = getString(R.string.status_changed_at_unknown);
+        }
+        binding.statusChangedAt.setText(changedAt);
+        binding.statusRelative.setText(relative);
+        binding.statusRelative.setVisibility(relative.isEmpty() ? View.GONE : View.VISIBLE);
+        binding.statusSummary.setContentDescription(getString(title) + ". " + changedAt
+                + (relative.isEmpty() ? "" : ", " + relative));
+
+        boolean nextIsLock = !state.hasRecord || !state.locked;
+        binding.toggleButton.setText(nextIsLock ? R.string.action_mark_locked : R.string.action_mark_unlocked);
+        binding.toggleButton.setIconResource(nextIsLock ? R.drawable.ic_button_lock : R.drawable.ic_button_unlock);
+    }
+
+    // ---- Reminder ----------------------------------------------------------------------------
+
+    private void renderReminder() {
+        ReminderTime reminder = store.getReminder();
+        boolean enabled = reminder != null;
+        binding.reminderSummary.setText(enabled
+                ? getString(R.string.reminder_every_day_at, TimeFormatting.timeOfDay(this, reminder))
+                : getString(R.string.reminder_off));
+        binding.setReminderButton.setText(enabled ? R.string.reminder_change : R.string.reminder_set);
+        binding.turnOffReminderButton.setVisibility(enabled ? View.VISIBLE : View.GONE);
+        binding.reminderNote.setVisibility(enabled ? View.VISIBLE : View.GONE);
+        binding.notificationWarning.setVisibility(
+                enabled && !ReminderNotifications.canPost(this) ? View.VISIBLE : View.GONE);
     }
 
     private void showTimePicker() {
-        Calendar calendar = Calendar.getInstance();
-        int hour = calendar.get(Calendar.HOUR_OF_DAY);
-        int minute = calendar.get(Calendar.MINUTE);
-
-        TimePickerDialog timePicker = new TimePickerDialog(this, (view, hourOfDay, minuteOfHour) -> {
-            Calendar reminderTime = Calendar.getInstance();
-            reminderTime.set(Calendar.HOUR_OF_DAY, hourOfDay);
-            reminderTime.set(Calendar.MINUTE, minuteOfHour);
-            reminderTime.set(Calendar.SECOND, 0);
-
-            scheduleReminder(reminderTime);
-        }, hour, minute, false);
-
-        timePicker.show();
+        ReminderTime current = store.getReminder();
+        ReminderTime initial = current != null ? current : DEFAULT_REMINDER;
+        MaterialTimePicker picker = new MaterialTimePicker.Builder()
+                .setTimeFormat(DateFormat.is24HourFormat(this) ? TimeFormat.CLOCK_24H : TimeFormat.CLOCK_12H)
+                .setHour(initial.hour)
+                .setMinute(initial.minute)
+                .setTitleText(R.string.reminder_picker_title)
+                .build();
+        attachPickerListener(picker);
+        picker.show(getSupportFragmentManager(), TIME_PICKER_TAG);
     }
 
-    private void scheduleReminder(Calendar reminderTime) {
-        Intent intent = new Intent(this, ReminderReceiver.class);
-        PendingIntent pendingIntent = PendingIntent.getBroadcast(this, 0, intent, PendingIntent.FLAG_IMMUTABLE);
-
-        AlarmManager alarmManager = (AlarmManager) getSystemService(ALARM_SERVICE);
-        alarmManager.setRepeating(
-                AlarmManager.RTC_WAKEUP,
-                reminderTime.getTimeInMillis(),
-                AlarmManager.INTERVAL_DAY,
-                pendingIntent
-        );
-
-        @SuppressLint("SimpleDateFormat")
-        SimpleDateFormat sdf = new SimpleDateFormat("hh:mm a");
-        String formattedTime = sdf.format(reminderTime.getTime());
-
-        SharedPreferences.Editor editor = prefs.edit();
-        editor.putString("reminder_time", formattedTime);
-        editor.apply();
-
-        updateReminderText(formattedTime);
+    private void attachPickerListener(@NonNull MaterialTimePicker picker) {
+        picker.addOnPositiveButtonClickListener(v -> onReminderTimeChosen(
+                ReminderTime.of(picker.getHour(), picker.getMinute())));
     }
 
-    private void updateReminderText(String time) {
-        reminderText.setText("Reminder set for: " + time);
-        Drawable icon = getResources().getDrawable(R.drawable.baseline_more_time_24, getTheme());
-        reminderText.setCompoundDrawablesWithIntrinsicBounds(icon, null, null, null);
-        reminderText.setCompoundDrawablePadding(12);
+    private void onReminderTimeChosen(@NonNull ReminderTime time) {
+        store.setReminder(time);
+        ReminderScheduler.schedule(this, time);
+        renderReminder();
+        showMessage(getString(R.string.reminder_saved, TimeFormatting.timeOfDay(this, time)));
+        // Ask in context for the Android 13+ permission; other blocked states are explained
+        // by the warning in the reminder card, which links to the system settings.
+        if (isNotificationPermissionMissing()
+                && (!store.wasNotificationPermissionAsked()
+                || shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS))) {
+            requestNotificationAccess();
+        }
     }
 
-    @SuppressLint("SetTextI18n")
-    private void updateUI(boolean isLocked, String time) {
-        Drawable icon;
+    private void turnOffReminder() {
+        store.clearReminder();
+        ReminderScheduler.cancel(this);
+        renderReminder();
+        showMessage(getString(R.string.reminder_removed));
+    }
 
-        if (isLocked) {
-            icon = getResources().getDrawable(R.drawable.baseline_lock_24);
-            icon.setBounds(0, 0, icon.getIntrinsicWidth(), icon.getIntrinsicHeight());
-            statusText.setCompoundDrawables(icon, null, null, null);
-            statusText.setText(" Locked");
-            switchLock.setTrackTintList(ColorStateList.valueOf(0xFF66BB6A));
-            switchLock.setThumbTintList(ColorStateList.valueOf(0xFF66BB6A));
+    /**
+     * Asks for notification permission in context (Android 13+), or opens the notification
+     * settings when the permission was permanently denied or notifications were turned off.
+     */
+    private void requestNotificationAccess() {
+        if (!isNotificationPermissionMissing()) {
+            openNotificationSettings();
+            return;
+        }
+        if (shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)) {
+            new MaterialAlertDialogBuilder(this)
+                    .setTitle(R.string.notifications_rationale_title)
+                    .setMessage(R.string.notifications_rationale_message)
+                    .setPositiveButton(R.string.action_continue, (d, w) -> launchPermissionRequest())
+                    .setNegativeButton(R.string.action_not_now, null)
+                    .show();
+        } else if (!store.wasNotificationPermissionAsked()) {
+            launchPermissionRequest();
         } else {
-            icon = getResources().getDrawable(R.drawable.baseline_lock_open_24);
-            icon.setBounds(0, 0, icon.getIntrinsicWidth(), icon.getIntrinsicHeight());
-            statusText.setCompoundDrawables(icon, null, null, null);
-            statusText.setText(" Unlocked");
-            switchLock.setTrackTintList(ColorStateList.valueOf(0xFFEF5350));
-            switchLock.setThumbTintList(ColorStateList.valueOf(0xFFEF5350));
+            // Denied twice, or "Don't ask again": only the system settings can grant it now.
+            openNotificationSettings();
         }
-
-        timeText.setText("Checked at: " + time);
-        Drawable clockIcon = getResources().getDrawable(R.drawable.baseline_access_time_24, getTheme());
-        timeText.setCompoundDrawablesWithIntrinsicBounds(clockIcon, null, null, null);
-        timeText.setCompoundDrawablePadding(12);
     }
 
-    private void showTransparentPopup(boolean isLocked) {
-        String message = isLocked ? "Door is LOCKED" : "Door is UNLOCKED";
-
-        Dialog dialog = new Dialog(this);
-        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
-        dialog.setContentView(R.layout.dialog_popup);
-        dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
-
-        TextView popupMessage = dialog.findViewById(R.id.popupMessage);
-        popupMessage.setText(message);
-
-        Drawable icon = getResources().getDrawable(
-                isLocked ? R.drawable.baseline_lock_24 : R.drawable.baseline_lock_open_24,
-                getTheme()
-        );
-        popupMessage.setCompoundDrawablesWithIntrinsicBounds(icon, null, null, null);
-        popupMessage.setCompoundDrawablePadding(16);
-
-        WindowManager.LayoutParams params = dialog.getWindow().getAttributes();
-        params.gravity = Gravity.CENTER;
-        params.width = WindowManager.LayoutParams.WRAP_CONTENT;
-        params.height = WindowManager.LayoutParams.WRAP_CONTENT;
-        dialog.getWindow().setAttributes(params);
-
-        dialog.show();
-        new Handler().postDelayed(dialog::dismiss, 4000);
+    private boolean isNotificationPermissionMissing() {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED;
     }
 
-    private void deleteReminder() {
-        AlarmManager alarmManager = (AlarmManager) getSystemService(ALARM_SERVICE);
-        Intent intent = new Intent(this, ReminderReceiver.class);
-        PendingIntent pendingIntent = PendingIntent.getBroadcast(this, 0, intent, PendingIntent.FLAG_IMMUTABLE);
+    private void launchPermissionRequest() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return;
+        store.setNotificationPermissionAsked();
+        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS);
+    }
 
-        if (alarmManager != null) {
-            alarmManager.cancel(pendingIntent);
+    private void openNotificationSettings() {
+        Intent intent;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            intent = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName());
+        } else {
+            intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.fromParts("package", getPackageName(), null));
         }
-
-        SharedPreferences.Editor editor = prefs.edit();
-        editor.remove("reminder_time");
-        editor.apply();
-
-        reminderText.setText("");
-        reminderText.setCompoundDrawablesWithIntrinsicBounds(null, null, null, null);
+        try {
+            startActivity(intent);
+        } catch (ActivityNotFoundException e) {
+            showMessage(getString(R.string.error_no_settings));
+        }
     }
 
-    private String getCurrentTime() {
-        return new SimpleDateFormat("EEE, MMM d, yyyy, hh:mm a", Locale.getDefault()).format(new Date());
+    // ---- Helpers -----------------------------------------------------------------------------
+
+    private void openUri(@NonNull Uri uri, @StringRes int errorMessage) {
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, uri));
+        } catch (ActivityNotFoundException e) {
+            Toast.makeText(this, errorMessage, Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void showMessage(@NonNull String message) {
+        Snackbar snackbar = Snackbar.make(binding.getRoot(), message, Snackbar.LENGTH_LONG);
+        if (binding.adContainer.getVisibility() == View.VISIBLE) {
+            snackbar.setAnchorView(binding.adContainer);
+        }
+        snackbar.show();
     }
 }

@@ -12,10 +12,14 @@
 #   public *;
 #}
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# Keep line numbers so Play Console crash reports can be de-obfuscated with mapping.txt.
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# Room (used by WorkManager, a Mobile Ads SDK dependency) instantiates generated databases by
+# reflection. Without this, R8 full mode removed WorkDatabase_Impl and release builds crashed on
+# launch (verified on a device).
+-keep class * extends androidx.room.RoomDatabase { <init>(); }
+
+# App components are kept through the manifest; the Mobile Ads and UMP SDKs ship their own
+# consumer rules, so no additional keep rules are required.
